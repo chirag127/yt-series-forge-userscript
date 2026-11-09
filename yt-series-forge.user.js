@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Series Forge
 // @namespace    https://github.com/chirag127
-// @version      1.0.2
+// @version      1.1.1
 // @description  Finds the best channels that explain a series, learns the real episode count from TVMaze/AniList, loops to hunt missing episodes, and builds one playlist per top channel.
 // @author       chirag127
 // @license      MIT
@@ -11,7 +11,7 @@
 // @supportURL   https://github.com/chirag127/yt-series-forge-userscript/issues
 // @downloadURL  https://github.com/chirag127/yt-series-forge-userscript/raw/main/yt-series-forge.user.js
 // @updateURL    https://github.com/chirag127/yt-series-forge-userscript/raw/main/yt-series-forge.user.js
-// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib-1.2.0.js
+// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib-1.4.0.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
@@ -29,7 +29,7 @@
  * A SEPARATE SCRIPT ON PURPOSE — this is a different job from the playlist toolkit.
  *
  * It shares storage, the single AI key and the whole InnerTube layer with the other
- * scripts via `@require .../yt-core-lib-1.2.0.js`, so nothing is duplicated.
+ * scripts via `@require .../yt-core-lib-1.4.0.js`, so nothing is duplicated.
  *
  * Episode truth comes from metadata, not guesswork:
  *   TVMaze   keyless, CC BY-SA — /search/shows?q= then /shows/:id/episodes
@@ -246,6 +246,81 @@
 
   // ------------------------------------------------------------ the agentic loop
 
+  /**
+   * Let the model decide how many channels deserve their own playlist. Some series have eight
+   * excellent explainers, some have one, so a fixed number is wrong either way. Hard cap 15.
+   * Falls back to the configured count when the AI is unavailable or returns nothing usable.
+   */
+  async function chooseChannels(ranked, name, truth) {
+    var CAP = 15;
+    var fallback = Math.max(1, Math.min(CAP, fsettings().channels || 3));
+
+    if (!Ytk.aiReady() || !ranked.length) {
+      return {
+        list: ranked.slice(0, fallback),
+        byAi: false,
+        reason: 'AI unavailable - using your fallback count of ' + fallback
+      };
+    }
+
+    var res = await Ytk.aiJson(
+      'You decide how many YouTube channels deserve their own playlist for one series. '
+        + 'Return STRICT JSON only: an object with count (number), channels (array of objects having '
+        + 'channelId and why), and reason (string). Include only channels that genuinely cover the '
+        + 'series well. Returning just 1 is correct when only 1 is good. Never return more than '
+        + CAP + '. Use only the channelIds given and never invent ids.',
+      JSON.stringify({
+        series: name,
+        expectedEpisodes: truth.total || null,
+        channels: ranked.slice(0, CAP).map(function (c) {
+          return {
+            channelId: c.id,
+            name: c.name,
+            subscribers: c.subs || 0,
+            episodesCovered: c.eps.size,
+            score: c.score
+          };
+        })
+      })
+    );
+
+    if (!res.ok || !res.data) {
+      return {
+        list: ranked.slice(0, fallback),
+        byAi: false,
+        reason: 'AI could not decide (' + (res.error || 'no reply') + ') - using ' + fallback
+      };
+    }
+
+    var allowed = {};
+    ranked.forEach(function (c) { allowed[c.id] = c; });
+
+    var seen = {};
+    var picked = [];
+    var asked = res.data.channels || [];
+    for (var i = 0; i < asked.length && picked.length < CAP; i++) {
+      var id = asked[i] && asked[i].channelId;
+      if (!id || seen[id] || !allowed[id]) continue;
+      seen[id] = 1;
+      picked.push(allowed[id]);
+    }
+
+    if (!picked.length) {
+      return {
+        list: ranked.slice(0, fallback),
+        byAi: false,
+        reason: 'AI picked no usable channel - using ' + fallback
+      };
+    }
+
+    return {
+      list: picked,
+      byAi: true,
+      dropped: Math.max(0, asked.length - picked.length),
+      reason: String(res.data.reason || ('AI chose ' + picked.length + ' channel(s).')).slice(0, 300)
+    };
+  }
+
   async function forge() {
     var raw = prompt('Series name — I will find the best channels that explain it.\nExample: Breaking Bad', '');
     if (!raw || !raw.trim()) return;
@@ -344,7 +419,11 @@
       return;
     }
 
-    var top = finalRanked.slice(0, Math.max(1, Math.min(5, cfg.channels)));
+    ui.log("Deciding how many of these " + finalRanked.length + " channel(s) deserve a playlist...");
+    var choice = await chooseChannels(finalRanked, name, truth);
+    ui.log("  " + choice.reason, choice.byAi ? "ok" : "warn");
+    if (choice.dropped) ui.log("  " + choice.dropped + " AI-suggested channel id(s) were unknown and dropped.", "warn");
+    var top = choice.list;
     var plan = [];
 
     for (var pi = 0; pi < top.length; pi++) {
@@ -437,14 +516,14 @@
 
   function editForgeSettings() {
     var cur = fsettings();
-    var ch = prompt('How many channels should each get their own playlist? (1-5)', String(cur.channels));
+    var ch = prompt('Fallback number of playlists when the AI cannot decide (1-15). The AI normally chooses this itself.', String(cur.channels));
     if (ch === null) return;
     var rounds = prompt('Max agentic rounds — each round hunts the missing episodes', String(cur.maxRounds));
     if (rounds === null) return;
     var q = prompt('Max search phrasings per round', String(cur.maxQueries));
     if (q === null) return;
     saveFsettings({
-      channels: Math.max(1, Math.min(5, parseInt(ch, 10) || cur.channels)),
+      channels: Math.max(1, Math.min(15, parseInt(ch, 10) || cur.channels)),
       maxRounds: Math.max(1, Math.min(6, parseInt(rounds, 10) || cur.maxRounds)),
       maxQueries: Math.max(1, Math.min(10, parseInt(q, 10) || cur.maxQueries))
     });
@@ -481,7 +560,7 @@
       '  edit these in the YouTube Toolkit script, set once',
       '',
       'Forge:',
-      '  playlists made per run: ' + f.channels,
+      '  playlists: chosen by the AI, cap 15 (fallback ' + f.channels + ')',
       '  agentic rounds: ' + f.maxRounds,
       '  phrasings per round: ' + f.maxQueries,
       '  gap searches per round: ' + f.queriesPerGap,
