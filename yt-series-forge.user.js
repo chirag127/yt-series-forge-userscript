@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Series Forge
 // @namespace    https://github.com/chirag127
-// @version      1.0.0
+// @version      1.0.1
 // @description  Finds the best channels that explain a series, learns the real episode count from TVMaze/AniList, loops to hunt missing episodes, and builds one playlist per top channel.
 // @author       chirag127
 // @license      MIT
@@ -11,7 +11,7 @@
 // @supportURL   https://github.com/chirag127/yt-series-forge-userscript/issues
 // @downloadURL  https://github.com/chirag127/yt-series-forge-userscript/raw/main/yt-series-forge.user.js
 // @updateURL    https://github.com/chirag127/yt-series-forge-userscript/raw/main/yt-series-forge.user.js
-// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib.js
+// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib.js?v=1.1.1
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
@@ -28,7 +28,7 @@
  * A SEPARATE SCRIPT ON PURPOSE — this is a different job from the playlist toolkit.
  *
  * It shares storage, the single AI key and the whole InnerTube layer with the other
- * scripts via `@require .../yt-core-lib.js`, so nothing is duplicated.
+ * scripts via `@require .../yt-core-lib.js?v=1.1.1`, so nothing is duplicated.
  *
  * Episode truth comes from metadata, not guesswork:
  *   TVMaze   keyless, CC BY-SA — /search/shows?q= then /shows/:id/episodes
