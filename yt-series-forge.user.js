@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Series Forge
 // @namespace    https://github.com/chirag127
-// @version      2.0.0
+// @version      2.1.0
 // @description  Builds explanation/recap playlists for a series: learns the real episode count, ranks channels on the quality of their videos (never subscriber count), reuses an existing playlist when the channel already has one, and makes exactly ONE AI call at the end with all gathered context.
 // @author       chirag127
 // @license      MIT
@@ -228,6 +228,33 @@
 
   // ------------------------------------------------------------------ ranking
 
+  /**
+   * Which script a title is written in. The owner reads English and Hindi only, so a video
+   * whose title is Thai, Tamil, CJK and so on is not useful even if it covers an episode.
+   * Latin covers English and transliterated titles; Devanagari covers Hindi.
+   */
+  function scriptOf(text) {
+    const t = String(text || '');
+    if (/[ऀ-ॿ]/.test(t)) return 'devanagari';
+    if (/[฀-๿]/.test(t)) return 'thai';
+    if (/[஀-௿]/.test(t)) return 'tamil';
+    if (/[ఀ-౿]/.test(t)) return 'telugu';
+    if (/[ಀ-೿]/.test(t)) return 'kannada';
+    if (/[ঀ-৿]/.test(t)) return 'bengali';
+    if (/[぀-ヿ]/.test(t)) return 'kana';
+    if (/[一-鿿]/.test(t)) return 'cjk';
+    if (/[가-힯]/.test(t)) return 'hangul';
+    if (/[؀-ۿ]/.test(t)) return 'arabic';
+    if (/[Ѐ-ӿ]/.test(t)) return 'cyrillic';
+    return 'latin';
+  }
+
+  /** True when the title is English or Hindi. Anything else is filtered out of the pool. */
+  function languageOk(title) {
+    const sc = scriptOf(title);
+    return sc === 'latin' || sc === 'devanagari';
+  }
+
   function expandQueries(name, templates, limit) {
     const out = [];
     for (const raw of templates) {
@@ -429,6 +456,7 @@
     pool.forEach(function (v) {
       if (!v.channelId) return;
       if (seriesAffinity(v.title, name) < 0.4) return;
+      if (!languageOk(v.title)) return;
       if (!byChannel.has(v.channelId)) {
         byChannel.set(v.channelId, { id: v.channelId, name: v.channel || v.channelId, videos: [], subs: 0 });
       }
@@ -475,7 +503,7 @@
       return { ok: false, error: 'AI is not configured', plan: null };
     }
 
-    const channels = ranked.slice(0, 12).map(function (ch) {
+    const channels = ranked.slice(0, 8).map(function (ch) {
       return {
         channelId: ch.id,
         channel: ch.name,
@@ -485,7 +513,7 @@
         existingPlaylists: (ch.existing || []).slice(0, 3).map(function (p) {
           return { playlistId: p.id, title: p.title, videoCount: p.count };
         }),
-        candidates: ch.videos.slice(0, 40).map(function (v) {
+        candidates: ch.videos.slice(0, 20).map(function (v) {
           return { videoId: v.id, title: v.title, duration: v.duration, views: v.views || '' };
         })
       };
@@ -652,6 +680,7 @@
           channelId: ch.id,
           title: name + ' - ' + ch.name,
           videoIds: ch.videos.slice(0, c.videosPerPlaylist).map(function (v) { return v.id; }),
+          reusePlaylistId: (ch.existing && ch.existing.length) ? ch.existing[0].id : null,
           why: 'fallback: best available coverage'
         };
       });
@@ -828,6 +857,6 @@
   }
 
   try {
-    localStorage.setItem('ytk.forge.boot', JSON.stringify({ at: Date.now(), core: Ytk.VERSION, version: '2.0.0' }));
+    localStorage.setItem('ytk.forge.boot', JSON.stringify({ at: Date.now(), core: Ytk.VERSION, version: '2.1.0' }));
   } catch (e) { /* ignore */ }
 })();
